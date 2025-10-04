@@ -1,0 +1,249 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Family AI Companion API",
+    "version": "0.1.0",
+    "description": "Endpoints served by the FastAPI backend"
+  },
+  "paths": {
+    "/api/chat": {
+      "post": {
+        "summary": "Chat with the parenting assistant",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Chat response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tips": {
+      "get": {
+        "summary": "Fetch parenting tips",
+        "parameters": [
+          {
+            "name": "age_range",
+            "in": "query",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tips payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TipResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/profile": {
+      "post": {
+        "summary": "Create household profile",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileCreatePayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/upload": {
+      "post": {
+        "summary": "Upload corpus document",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ingestion summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/documents": {
+      "get": {
+        "summary": "List ingested documents",
+        "responses": {
+          "200": {
+            "description": "Document list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AdminDocument"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/documents/{document_id}": {
+      "delete": {
+        "summary": "Delete an ingested document",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Document removed"
+          },
+          "404": {
+            "description": "Document not found"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ChatRequest": {
+        "type": "object",
+        "properties": {
+          "message": { "type": "string" },
+          "persona": { "type": "string", "enum": ["neutral", "yazan"] },
+          "language": { "type": "string", "enum": ["msa", "jordanian"] },
+          "household_id": { "type": "string", "nullable": true }
+        },
+        "required": ["message"]
+      },
+      "ChatResponse": {
+        "type": "object",
+        "properties": {
+          "reply": { "type": "string" },
+          "needs_human": { "type": "boolean" },
+          "safety_reasons": { "type": "array", "items": { "type": "string" } },
+          "context": { "type": "array", "items": { "type": "string" } },
+          "persona": { "type": "string" }
+        }
+      },
+      "TipResponse": {
+        "type": "object",
+        "properties": {
+          "age_range": { "type": "string" },
+          "tips": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "ProfileCreatePayload": {
+        "type": "object",
+        "properties": {
+          "household_name": { "type": "string" },
+          "country": { "type": "string" },
+          "language_preference": { "type": "string" },
+          "parent_email": { "type": "string" },
+          "parent_password": { "type": "string" },
+          "children": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "age": { "type": "integer" },
+                "favorite_topics": { "type": "string" }
+              }
+            }
+          }
+        },
+        "required": ["household_name", "parent_email", "parent_password"]
+      },
+      "ProfileResponse": {
+        "type": "object",
+        "properties": {
+          "household_id": { "type": "string" },
+          "admin_token": { "type": "string" }
+        }
+      },
+      "UploadForm": {
+        "type": "object",
+        "properties": {
+          "file": { "type": "string", "format": "binary" },
+          "topic": { "type": "string" },
+          "age_range": { "type": "string" },
+          "tone": { "type": "string" },
+          "country": { "type": "string" },
+          "language": { "type": "string" }
+        }
+      },
+      "UploadResponse": {
+        "type": "object",
+        "properties": {
+          "document_id": { "type": "string" },
+          "stored_chunks": { "type": "integer" }
+        }
+      },
+      "AdminDocument": {
+        "type": "object",
+        "properties": {
+          "document_id": { "type": "string" },
+          "file_name": { "type": "string" },
+          "topic": { "type": "string" },
+          "age_range": { "type": "string" },
+          "tone": { "type": "string" },
+          "country": { "type": "string" },
+          "language": { "type": "string" },
+          "chunk_count": { "type": "integer" },
+          "s3_uploaded": { "type": "boolean" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  }
+}

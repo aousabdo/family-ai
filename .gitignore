@@ -1,0 +1,27 @@
+# Node/Next.js
+node_modules/
+web/node_modules/
+.next/
+out/
+dist/
+coverage/
+npm-debug.log*
+yarn-error.log*
+.pnpm-store/
+
+# Env/config
+.env
+.env.*
+!.env.example
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Python (since you have a venv)
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/

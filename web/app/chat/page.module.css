@@ -1,0 +1,23 @@
+.page {
+  display: grid;
+  gap: 2rem;
+  padding: 0 1rem 3rem;
+}
+
+.title {
+  font-size: 1.9rem;
+  margin: 0;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+@media (max-width: 768px) {
+  .page {
+    gap: 1.5rem;
+    padding: 0 0.75rem 2.5rem;
+  }
+
+  .title {
+    font-size: 1.55rem;
+  }
+}
