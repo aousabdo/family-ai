@@ -6,6 +6,7 @@ export interface ChatRequestBody {
   persona: PersonaOption;
   language: LanguageOption;
   household_id?: string;
+  thread_id: string;
 }
 
 export interface ChatResponseBody {

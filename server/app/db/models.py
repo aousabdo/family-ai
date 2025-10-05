@@ -9,6 +9,7 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.sql import func
 
 from app.db.session import Base
 
@@ -97,3 +98,16 @@ class DocumentRegistry(Base, TimestampMixin):
     language: Mapped[str] = mapped_column(String(8), default="ar")
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
     s3_uploaded: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+# --- Chat memory (per-thread) ---
+
+
+class ChatTurn(Base):
+    __tablename__ = "chat_turns"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid4()))
+    thread_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)

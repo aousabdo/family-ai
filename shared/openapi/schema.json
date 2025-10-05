@@ -161,9 +161,10 @@
           "message": { "type": "string" },
           "persona": { "type": "string", "enum": ["neutral", "yazan"] },
           "language": { "type": "string", "enum": ["msa", "jordanian"] },
-          "household_id": { "type": "string", "nullable": true }
+          "household_id": { "type": "string", "nullable": true },
+          "thread_id": { "type": "string", "description": "Stable per-tab conversation id" }
         },
-        "required": ["message"]
+        "required": ["message", "thread_id"]
       },
       "ChatResponse": {
         "type": "object",

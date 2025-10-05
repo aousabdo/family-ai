@@ -1,11 +1,13 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { sendChat } from '@/lib/api';
 import type { ChatResponseBody, LanguageOption, PersonaOption } from '@/lib/types';
 
 import styles from './Chat.module.css';
+
+const THREAD_KEY = 'family-ai-thread-id';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -136,6 +138,25 @@ export default function Chat() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [threadId, setThreadId] = useState('');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    try {
+      const storage = window.sessionStorage;
+      let existing = storage.getItem(THREAD_KEY);
+      if (!existing) {
+        existing = window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+        storage.setItem(THREAD_KEY, existing);
+      }
+      setThreadId(existing);
+    } catch {
+      const fallback = typeof window.crypto?.randomUUID === 'function' ? window.crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+      setThreadId(fallback);
+    }
+  }, []);
 
   const disclaimer = useMemo(
     () =>
@@ -148,6 +169,18 @@ export default function Chat() {
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!input.trim()) return;
+    let activeThreadId = threadId;
+    if (!activeThreadId) {
+      activeThreadId = window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+      setThreadId(activeThreadId);
+      try {
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.setItem(THREAD_KEY, activeThreadId);
+        }
+      } catch {
+        /* ignore persistence failure */
+      }
+    }
 
     setIsLoading(true);
     setError(null);
@@ -162,6 +195,7 @@ export default function Chat() {
         persona,
         language,
         household_id: householdId || undefined,
+        thread_id: activeThreadId,
       });
       appendAssistant(response);
     } catch (err) {

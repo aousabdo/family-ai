@@ -3,6 +3,7 @@ export interface ChatRequest {
   persona?: 'neutral' | 'yazan';
   language?: 'msa' | 'jordanian';
   household_id?: string;
+  thread_id: string;
 }
 
 export interface ChatResponse {

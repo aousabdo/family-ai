@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import chat, profile, tips, upload
 from app.core.safety import SafetyChecker
 from app.core.settings import Settings, get_settings
-from app.db.session import init_db
+from app.db.session import Base, engine, init_db
 
 
 @asynccontextmanager
@@ -34,6 +35,9 @@ def create_app() -> FastAPI:
     app.include_router(profile.router, prefix="/api", tags=["profile"])
     app.include_router(tips.router, prefix="/api", tags=["tips"])
     app.include_router(upload.router, prefix="/api", tags=["admin"])
+
+    if os.getenv("ENVIRONMENT", "development") == "development":
+        Base.metadata.create_all(bind=engine)
 
     @app.get("/healthz", tags=["health"])
     async def health() -> dict[str, str]:

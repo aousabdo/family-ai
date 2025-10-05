@@ -15,6 +15,7 @@ from app.db.session import SessionLocal, session_scope
 from app.rag.retriever import Retriever, build_retriever
 
 router = APIRouter()
+HISTORY_MAX_MESSAGES = 16
 
 
 class ChatRequest(BaseModel):
@@ -22,6 +23,7 @@ class ChatRequest(BaseModel):
     persona: str = Field(default="neutral", description="neutral|yazan")
     language: str = Field(default="msa", description="msa|jordanian")
     household_id: str | None = None
+    thread_id: str = Field(..., min_length=1)
 
 
 class ChatResponse(BaseModel):
@@ -73,15 +75,18 @@ async def chat_endpoint(
             persona=payload.persona,
         )
 
+    with session_scope() as session:
+        history = crud.fetch_history(session, payload.thread_id, max_messages=HISTORY_MAX_MESSAGES)
+
     retrieval = await retriever.retrieve(payload.message, top_k=settings.max_context_docs)
     context_prompt = format_context(retrieval.context_bullets)
     system_prompt = build_system_prompt(persona=payload.persona, language=payload.language, settings=settings)
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "system", "content": context_prompt},
-        {"role": "user", "content": payload.message},
-    ]
+    messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+    if context_prompt:
+        messages.append({"role": "system", "content": context_prompt})
+    messages.extend(history)
+    messages.append({"role": "user", "content": payload.message})
 
     reply_text = await openai_client.chat(messages)
     reply_text = _trim_words(reply_text, settings.max_response_words)
@@ -91,6 +96,8 @@ async def chat_endpoint(
     reasons = list({*safety_result.reasons, *output_safety.reasons})
 
     with session_scope() as session:
+        crud.log_turn(session, payload.thread_id, "user", payload.message)
+        crud.log_turn(session, payload.thread_id, "assistant", reply_text)
         crud.record_chat_log(
             session,
             household_id=payload.household_id,

@@ -1,7 +1,7 @@
 """CRUD helpers for application data."""
 from __future__ import annotations
 
-from typing import Optional
+from typing import Dict, List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -139,3 +139,20 @@ def record_chat_log(
     session.add(log)
     session.flush()
     return log
+
+
+def log_turn(session: Session, thread_id: str, role: str, content: str) -> None:
+    turn = models.ChatTurn(thread_id=thread_id, role=role, content=content)
+    session.add(turn)
+
+
+def fetch_history(session: Session, thread_id: str, max_messages: int = 16) -> List[Dict[str, str]]:
+    stmt = (
+        select(models.ChatTurn)
+        .where(models.ChatTurn.thread_id == thread_id)
+        .order_by(models.ChatTurn.created_at.desc())
+        .limit(max_messages)
+    )
+    turns = list(session.scalars(stmt).all())
+    turns.reverse()
+    return [{"role": turn.role, "content": turn.content} for turn in turns]
