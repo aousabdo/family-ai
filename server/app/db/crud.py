@@ -1,12 +1,15 @@
 """CRUD helpers for application data."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
+
+import uuid
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.security import get_password_hash
+from app.core.security import get_password_hash, verify_password
 from app.db import models
 
 
@@ -144,15 +147,113 @@ def record_chat_log(
 def log_turn(session: Session, thread_id: str, role: str, content: str) -> None:
     turn = models.ChatTurn(thread_id=thread_id, role=role, content=content)
     session.add(turn)
+    thread = session.get(models.ChatThread, thread_id)
+    if thread is not None:
+        thread.last_message_at = datetime.now(timezone.utc)
 
 
-def fetch_history(session: Session, thread_id: str, max_messages: int = 16) -> List[Dict[str, str]]:
-    stmt = (
-        select(models.ChatTurn)
-        .where(models.ChatTurn.thread_id == thread_id)
-        .order_by(models.ChatTurn.created_at.desc())
-        .limit(max_messages)
+def fetch_history(session: Session, thread_id: str, max_messages: int | None = 16) -> List[Dict[str, str]]:
+    query = (
+        session.query(models.ChatTurn)
+        .filter(models.ChatTurn.thread_id == thread_id)
+        .order_by(models.ChatTurn.created_at.asc(), models.ChatTurn.id.asc())
     )
-    turns = list(session.scalars(stmt).all())
-    turns.reverse()
+    turns = list(query)
+    if max_messages and max_messages > 0:
+        turns = turns[-max_messages:]
     return [{"role": turn.role, "content": turn.content} for turn in turns]
+
+
+def fetch_thread_messages(session: Session, thread_id: str, limit: int = 200) -> List[models.ChatTurn]:
+    query = (
+        session.query(models.ChatTurn)
+        .filter(models.ChatTurn.thread_id == thread_id)
+        .order_by(models.ChatTurn.created_at.asc())
+    )
+    if limit:
+        query = query.limit(limit)
+    return list(query)
+
+
+def get_thread(session: Session, thread_id: str) -> Optional[models.ChatThread]:
+    if not thread_id:
+        return None
+    return session.get(models.ChatThread, thread_id)
+
+
+def create_thread(
+    session: Session,
+    *,
+    persona: Optional[str],
+    lang: Optional[str],
+    browser_id: Optional[str],
+    household_id: Optional[str],
+    title: Optional[str] = None,
+) -> models.ChatThread:
+    thread = models.ChatThread(
+        id=str(uuid.uuid4()),
+        persona=persona or "neutral",
+        lang=lang or "msa",
+        browser_id=browser_id,
+        household_id=household_id,
+        title=title,
+    )
+    session.add(thread)
+    session.flush()
+    return thread
+
+
+def update_thread_title(session: Session, thread: models.ChatThread, first_user_message: str) -> None:
+    if not thread.title:
+        snippet = first_user_message.strip().splitlines()[0][:80]
+        thread.title = snippet
+
+
+def move_threads_from_browser_to_household(session: Session, browser_id: str, household_id: str) -> int:
+    if not browser_id:
+        return 0
+    query = (
+        session.query(models.ChatThread)
+        .filter(models.ChatThread.browser_id == browser_id, models.ChatThread.household_id.is_(None))
+    )
+    moved = 0
+    for thread in query:
+        thread.household_id = household_id
+        moved += 1
+    return moved
+
+
+def list_threads_for_household(session: Session, household_id: str, limit: int = 50) -> List[models.ChatThread]:
+    return (
+        session.query(models.ChatThread)
+        .filter(models.ChatThread.household_id == household_id, models.ChatThread.archived.is_(False))
+        .order_by(models.ChatThread.last_message_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+def list_threads_for_browser(session: Session, browser_id: str, limit: int = 50) -> List[models.ChatThread]:
+    return (
+        session.query(models.ChatThread)
+        .filter(models.ChatThread.browser_id == browser_id, models.ChatThread.archived.is_(False))
+        .order_by(models.ChatThread.last_message_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+def set_household_secret(session: Session, household_id: str, secret: str) -> None:
+    auth = session.get(models.HouseholdAuth, household_id)
+    hashed = get_password_hash(secret)
+    if auth:
+        auth.secret_hash = hashed
+    else:
+        session.add(models.HouseholdAuth(household_id=household_id, secret_hash=hashed))
+
+
+def verify_household_secret(session: Session, household_id: str, secret: str) -> bool:
+    auth = session.get(models.HouseholdAuth, household_id)
+    if not auth:
+        return False
+    return verify_password(secret, auth.secret_hash)

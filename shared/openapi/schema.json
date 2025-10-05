@@ -40,7 +40,9 @@
           {
             "name": "age_range",
             "in": "query",
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -139,7 +141,9 @@
             "name": "document_id",
             "in": "path",
             "required": true,
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -151,6 +155,145 @@
           }
         }
       }
+    },
+    "/api/chat/new": {
+      "post": {
+        "summary": "Create a new chat thread",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatNewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Thread identifier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatNewResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat/threads": {
+      "get": {
+        "summary": "List chat threads for the current session",
+        "responses": {
+          "200": {
+            "description": "Thread list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "threads": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ChatThreadSummary"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat/history": {
+      "get": {
+        "summary": "Fetch recent turns for a thread",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Thread history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat/claim": {
+      "post": {
+        "summary": "Attach guest threads to the authenticated household",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatClaimRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Number of threads moved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "moved": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/households": {
+      "get": {
+        "summary": "DEV: list recent households",
+        "responses": {
+          "200": {
+            "description": "Household list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HouseholdList"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -158,91 +301,329 @@
       "ChatRequest": {
         "type": "object",
         "properties": {
-          "message": { "type": "string" },
-          "persona": { "type": "string", "enum": ["neutral", "yazan"] },
-          "language": { "type": "string", "enum": ["msa", "jordanian"] },
-          "household_id": { "type": "string", "nullable": true },
-          "thread_id": { "type": "string", "description": "Stable per-tab conversation id" }
+          "message": {
+            "type": "string"
+          },
+          "persona": {
+            "type": "string",
+            "enum": [
+              "neutral",
+              "yazan"
+            ]
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "msa",
+              "jordanian"
+            ]
+          },
+          "household_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "thread_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Existing thread id when continuing"
+          },
+          "browser_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Browser session identifier for guests"
+          }
         },
-        "required": ["message", "thread_id"]
+        "required": [
+          "message"
+        ]
       },
       "ChatResponse": {
         "type": "object",
         "properties": {
-          "reply": { "type": "string" },
-          "needs_human": { "type": "boolean" },
-          "safety_reasons": { "type": "array", "items": { "type": "string" } },
-          "context": { "type": "array", "items": { "type": "string" } },
-          "persona": { "type": "string" }
+          "reply": {
+            "type": "string"
+          },
+          "needs_human": {
+            "type": "boolean"
+          },
+          "safety_reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "context": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "persona": {
+            "type": "string"
+          },
+          "thread_id": {
+            "type": "string"
+          }
         }
       },
       "TipResponse": {
         "type": "object",
         "properties": {
-          "age_range": { "type": "string" },
-          "tips": { "type": "array", "items": { "type": "string" } }
+          "age_range": {
+            "type": "string"
+          },
+          "tips": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
         }
       },
       "ProfileCreatePayload": {
         "type": "object",
         "properties": {
-          "household_name": { "type": "string" },
-          "country": { "type": "string" },
-          "language_preference": { "type": "string" },
-          "parent_email": { "type": "string" },
-          "parent_password": { "type": "string" },
+          "household_name": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "language_preference": {
+            "type": "string"
+          },
+          "parent_email": {
+            "type": "string"
+          },
+          "parent_password": {
+            "type": "string"
+          },
           "children": {
             "type": "array",
             "items": {
               "type": "object",
               "properties": {
-                "name": { "type": "string" },
-                "age": { "type": "integer" },
-                "favorite_topics": { "type": "string" }
+                "name": {
+                  "type": "string"
+                },
+                "age": {
+                  "type": "integer"
+                },
+                "favorite_topics": {
+                  "type": "string"
+                }
               }
             }
           }
         },
-        "required": ["household_name", "parent_email", "parent_password"]
+        "required": [
+          "household_name",
+          "parent_email",
+          "parent_password"
+        ]
       },
       "ProfileResponse": {
         "type": "object",
         "properties": {
-          "household_id": { "type": "string" },
-          "admin_token": { "type": "string" }
+          "household_id": {
+            "type": "string"
+          },
+          "admin_token": {
+            "type": "string"
+          }
         }
       },
       "UploadForm": {
         "type": "object",
         "properties": {
-          "file": { "type": "string", "format": "binary" },
-          "topic": { "type": "string" },
-          "age_range": { "type": "string" },
-          "tone": { "type": "string" },
-          "country": { "type": "string" },
-          "language": { "type": "string" }
+          "file": {
+            "type": "string",
+            "format": "binary"
+          },
+          "topic": {
+            "type": "string"
+          },
+          "age_range": {
+            "type": "string"
+          },
+          "tone": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          }
         }
       },
       "UploadResponse": {
         "type": "object",
         "properties": {
-          "document_id": { "type": "string" },
-          "stored_chunks": { "type": "integer" }
+          "document_id": {
+            "type": "string"
+          },
+          "stored_chunks": {
+            "type": "integer"
+          }
         }
       },
       "AdminDocument": {
         "type": "object",
         "properties": {
-          "document_id": { "type": "string" },
-          "file_name": { "type": "string" },
-          "topic": { "type": "string" },
-          "age_range": { "type": "string" },
-          "tone": { "type": "string" },
-          "country": { "type": "string" },
-          "language": { "type": "string" },
-          "chunk_count": { "type": "integer" },
-          "s3_uploaded": { "type": "boolean" },
-          "updated_at": { "type": "string", "format": "date-time" }
+          "document_id": {
+            "type": "string"
+          },
+          "file_name": {
+            "type": "string"
+          },
+          "topic": {
+            "type": "string"
+          },
+          "age_range": {
+            "type": "string"
+          },
+          "tone": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "chunk_count": {
+            "type": "integer"
+          },
+          "s3_uploaded": {
+            "type": "boolean"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ChatThreadSummary": {
+        "type": "object",
+        "properties": {
+          "thread_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "persona": {
+            "type": "string"
+          },
+          "lang": {
+            "type": "string"
+          },
+          "last_message_at": {
+            "type": "string"
+          }
+        }
+      },
+      "HistoryOut": {
+        "type": "object",
+        "properties": {
+          "thread_id": {
+            "type": "string"
+          },
+          "turns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string"
+                },
+                "content": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "role",
+                "content"
+              ]
+            }
+          }
+        }
+      },
+      "ChatNewRequest": {
+        "type": "object",
+        "properties": {
+          "persona": {
+            "type": "string",
+            "enum": [
+              "neutral",
+              "yazan"
+            ],
+            "nullable": true
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "msa",
+              "jordanian"
+            ],
+            "nullable": true
+          }
+        }
+      },
+      "ChatNewResponse": {
+        "type": "object",
+        "properties": {
+          "thread_id": {
+            "type": "string"
+          }
+        }
+      },
+      "ChatClaimRequest": {
+        "type": "object",
+        "properties": {
+          "browser_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "browser_id"
+        ]
+      },
+      "HouseholdSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "language_preference": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "primary_email": {
+            "type": "string",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "HouseholdList": {
+        "type": "object",
+        "properties": {
+          "households": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HouseholdSummary"
+            }
+          }
         }
       }
     }

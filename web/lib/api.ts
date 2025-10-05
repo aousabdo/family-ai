@@ -1,4 +1,12 @@
-import { AdminDocument, ChatRequestBody, ChatResponseBody, ProfilePayload, TipResponse } from './types';
+import {
+  AdminDocument,
+  ChatHistoryResponse,
+  ChatRequestBody,
+  ChatResponseBody,
+  ChatThreadSummary,
+  ProfilePayload,
+  TipResponse,
+} from './types';
 
 const configuredBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, '') ?? '';
 
@@ -35,13 +43,75 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-export async function sendChat(body: ChatRequestBody): Promise<ChatResponseBody> {
+interface AuthHeaders {
+  token?: string | null;
+  browserId?: string | null;
+}
+
+function buildHeaders(options: AuthHeaders = {}) {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (options.token) {
+    headers.Authorization = `Bearer ${options.token}`;
+  }
+  if (options.browserId) {
+    headers['x-browser-id'] = options.browserId;
+  }
+  return headers;
+}
+
+export async function sendChat(body: ChatRequestBody, options: AuthHeaders = {}): Promise<ChatResponseBody> {
   const res = await fetch(buildUrl('/chat'), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildHeaders(options),
     body: JSON.stringify(body),
   });
   return handleResponse<ChatResponseBody>(res);
+}
+
+export async function fetchThreads(options: AuthHeaders = {}): Promise<{ threads: ChatThreadSummary[] }> {
+  const res = await fetch(buildUrl('/chat/threads'), {
+    headers: buildHeaders(options),
+  });
+  return handleResponse<{ threads: ChatThreadSummary[] }>(res);
+}
+
+export async function fetchHistory(threadId: string, options: AuthHeaders = {}): Promise<ChatHistoryResponse> {
+  const search = new URLSearchParams({ thread_id: threadId });
+  const res = await fetch(buildUrl(`/chat/history?${search.toString()}`), {
+    headers: buildHeaders(options),
+  });
+  return handleResponse<ChatHistoryResponse>(res);
+}
+
+export async function createThread(
+  persona: string | undefined,
+  language: string | undefined,
+  options: AuthHeaders = {}
+): Promise<{ thread_id: string }> {
+  const res = await fetch(buildUrl('/chat/new'), {
+    method: 'POST',
+    headers: buildHeaders(options),
+    body: JSON.stringify({ persona, language }),
+  });
+  return handleResponse<{ thread_id: string }>(res);
+}
+
+export async function claimThreads(browserId: string, options: AuthHeaders = {}) {
+  const res = await fetch(buildUrl('/chat/claim'), {
+    method: 'POST',
+    headers: buildHeaders(options),
+    body: JSON.stringify({ browser_id: browserId }),
+  });
+  return handleResponse<{ moved: number }>(res);
+}
+
+export async function loginHousehold(household_id: string, secret: string): Promise<{ access_token: string }> {
+  const res = await fetch(buildUrl('/auth/household/login'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ household_id, secret }),
+  });
+  return handleResponse<{ access_token: string }>(res);
 }
 
 export async function fetchTips(ageRange: string): Promise<TipResponse> {

@@ -1,13 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { sendChat } from '@/lib/api';
-import type { ChatResponseBody, LanguageOption, PersonaOption } from '@/lib/types';
+import { claimThreads, createThread, fetchHistory, fetchThreads, loginHousehold, sendChat } from '@/lib/api';
+import type { ChatResponseBody, ChatThreadSummary, LanguageOption, PersonaOption } from '@/lib/types';
 
 import styles from './Chat.module.css';
 
-const THREAD_KEY = 'family-ai-thread-id';
+const BROWSER_ID_KEY = 'family-ai-browser-id';
+const TOKEN_KEY = 'family-ai-token';
+const ACTIVE_THREAD_KEY = 'family-ai-active-thread';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -130,6 +132,13 @@ function MarkdownMessage({ text }: { text: string }) {
   return <div className={styles.markdown} dir="auto" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
+function generateId() {
+  if (typeof window !== 'undefined' && typeof window.crypto?.randomUUID === 'function') {
+    return window.crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 export default function Chat() {
   const [persona, setPersona] = useState<PersonaOption>('neutral');
   const [language, setLanguage] = useState<LanguageOption>('msa');
@@ -138,25 +147,22 @@ export default function Chat() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [threadId, setThreadId] = useState('');
 
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    try {
-      const storage = window.sessionStorage;
-      let existing = storage.getItem(THREAD_KEY);
-      if (!existing) {
-        existing = window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
-        storage.setItem(THREAD_KEY, existing);
-      }
-      setThreadId(existing);
-    } catch {
-      const fallback = typeof window.crypto?.randomUUID === 'function' ? window.crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
-      setThreadId(fallback);
-    }
-  }, []);
+  const [browserId, setBrowserId] = useState('');
+  const [token, setToken] = useState<string | null>(null);
+  const [threads, setThreads] = useState<ChatThreadSummary[]>([]);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [isLoadingThreads, setIsLoadingThreads] = useState(false);
+  const [threadsError, setThreadsError] = useState<string | null>(null);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [messagesError, setMessagesError] = useState<string | null>(null);
+
+  const [isLoginModalOpen, setLoginModalOpen] = useState(false);
+  const [loginHouseholdId, setLoginHouseholdId] = useState('');
+  const [loginSecret, setLoginSecret] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  const skipHistoryFetchRef = useRef(false);
 
   const disclaimer = useMemo(
     () =>
@@ -166,168 +172,466 @@ export default function Chat() {
     [persona]
   );
 
+  const setActiveThreadPersistent = useCallback((threadId: string | null) => {
+    setActiveThreadId(threadId);
+    if (typeof window === 'undefined') {
+      return;
+    }
+    if (threadId) {
+      window.sessionStorage.setItem(ACTIVE_THREAD_KEY, threadId);
+    } else {
+      window.sessionStorage.removeItem(ACTIVE_THREAD_KEY);
+    }
+  }, []);
+
+  const syncThreadMetadata = useCallback(
+    (threadId: string, source?: ChatThreadSummary[]) => {
+      const list = source ?? threads;
+      const found = list.find((item) => item.thread_id === threadId);
+      if (found) {
+        setPersona(found.persona === 'yazan' ? 'yazan' : 'neutral');
+        setLanguage(found.lang === 'jordanian' ? 'jordanian' : 'msa');
+      }
+    },
+    [threads]
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    let id = window.localStorage.getItem(BROWSER_ID_KEY);
+    if (!id) {
+      id = generateId();
+      window.localStorage.setItem(BROWSER_ID_KEY, id);
+    }
+    setBrowserId(id);
+
+    const storedToken = window.localStorage.getItem(TOKEN_KEY);
+    if (storedToken) {
+      setToken(storedToken);
+    }
+
+    const storedThread = window.sessionStorage.getItem(ACTIVE_THREAD_KEY);
+    if (storedThread) {
+      setActiveThreadId(storedThread);
+    }
+  }, []);
+
+  const loadThreads = useCallback(async () => {
+    if (!browserId && !token) {
+      return;
+    }
+    setThreadsError(null);
+    setIsLoadingThreads(true);
+    try {
+      const data = await fetchThreads({ token, browserId });
+      setThreads(data.threads);
+      setThreadsError(null);
+
+      if (data.threads.length === 0) {
+        setActiveThreadPersistent(null);
+        setMessages([]);
+        return;
+      }
+
+      let targetId = activeThreadId;
+      if (!targetId || !data.threads.some((thread) => thread.thread_id === targetId)) {
+        targetId = data.threads[0].thread_id;
+      }
+      if (targetId) {
+        syncThreadMetadata(targetId, data.threads);
+        if (targetId !== activeThreadId) {
+          setActiveThreadPersistent(targetId);
+        }
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'تعذر تحميل المحادثات';
+      setThreadsError(message);
+    } finally {
+      setIsLoadingThreads(false);
+    }
+  }, [activeThreadId, browserId, syncThreadMetadata, token, setActiveThreadPersistent]);
+
+  const handleRetryThreads = useCallback(() => {
+    void loadThreads();
+  }, [loadThreads]);
+
+  useEffect(() => {
+    if (!threadsError) return;
+    const timer = setTimeout(() => setThreadsError(null), 5000);
+    return () => clearTimeout(timer);
+  }, [threadsError]);
+
+  const loadMessages = useCallback(
+    async (threadId: string) => {
+      setMessagesError(null);
+      setIsLoadingMessages(true);
+      try {
+        const data = await fetchHistory(threadId, { token, browserId });
+        const nextMessages: Message[] = data.turns.map((turn) => ({
+          role: turn.role === 'assistant' ? 'assistant' : 'user',
+          text: turn.content,
+        }));
+        setMessages(nextMessages);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'تعذر تحميل الرسائل';
+        setMessagesError(message);
+      } finally {
+        setIsLoadingMessages(false);
+      }
+    },
+    [browserId, token]
+  );
+
+  useEffect(() => {
+    if (!browserId && !token) {
+      return;
+    }
+    void loadThreads();
+  }, [browserId, token, loadThreads]);
+
+  useEffect(() => {
+    if (!activeThreadId) {
+      setMessages([]);
+      return;
+    }
+    if (skipHistoryFetchRef.current) {
+      skipHistoryFetchRef.current = false;
+      return;
+    }
+    void loadMessages(activeThreadId);
+  }, [activeThreadId, loadMessages]);
+
+  const handleSelectThread = (threadId: string) => {
+    syncThreadMetadata(threadId);
+    setActiveThreadPersistent(threadId);
+  };
+
+  const handleStartNewThread = async () => {
+    let sessionBrowserId = browserId;
+    if (!sessionBrowserId) {
+      sessionBrowserId = generateId();
+      setBrowserId(sessionBrowserId);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(BROWSER_ID_KEY, sessionBrowserId);
+      }
+    }
+    try {
+      setError(null);
+      const { thread_id } = await createThread(persona, language, { token, browserId: sessionBrowserId });
+      setMessages([]);
+      setActiveThreadPersistent(thread_id);
+      await loadThreads();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'تعذر إنشاء محادثة جديدة';
+      setError(message);
+    }
+  };
+
+  const handleLoginSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!browserId) {
+      setAuthError('لم يتم التعرف على المتصفح، أعد المحاولة.');
+      return;
+    }
+    if (!loginHouseholdId.trim() || !loginSecret.trim()) {
+      setAuthError('يرجى إدخال رمز العائلة والسر.');
+      return;
+    }
+    setAuthError(null);
+    try {
+      const { access_token } = await loginHousehold(loginHouseholdId.trim(), loginSecret.trim());
+      setToken(access_token);
+      window.localStorage.setItem(TOKEN_KEY, access_token);
+      await claimThreads(browserId, { token: access_token, browserId });
+      setLoginModalOpen(false);
+      setLoginSecret('');
+      await loadThreads();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'فشل تسجيل الدخول';
+      setAuthError(message);
+    }
+  };
+
+  const handleLogout = async () => {
+    setToken(null);
+    window.localStorage.removeItem(TOKEN_KEY);
+    await loadThreads();
+  };
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!input.trim()) return;
-    let activeThreadId = threadId;
-    if (!activeThreadId) {
-      activeThreadId = window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
-      setThreadId(activeThreadId);
-      try {
-        if (typeof window !== 'undefined') {
-          window.sessionStorage.setItem(THREAD_KEY, activeThreadId);
-        }
-      } catch {
-        /* ignore persistence failure */
+
+    setError(null);
+    setIsLoading(true);
+
+    let sessionBrowserId = browserId;
+    if (!sessionBrowserId) {
+      sessionBrowserId = generateId();
+      setBrowserId(sessionBrowserId);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(BROWSER_ID_KEY, sessionBrowserId);
       }
     }
-
-    setIsLoading(true);
-    setError(null);
 
     const userMessage: Message = { role: 'user', text: input };
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
 
     try {
-      const response = await sendChat({
-        message: userMessage.text,
-        persona,
-        language,
-        household_id: householdId || undefined,
-        thread_id: activeThreadId,
-      });
-      appendAssistant(response);
+      const response = await sendChat(
+        {
+          message: userMessage.text,
+          persona,
+          language,
+          household_id: householdId || undefined,
+          thread_id: activeThreadId || undefined,
+          browser_id: sessionBrowserId,
+        },
+        { token, browserId: sessionBrowserId }
+      );
+
+      const assistantMessage: Message = {
+        role: 'assistant',
+        text: response.reply,
+        context: response.context,
+        needsHuman: response.needs_human,
+      };
+
+      skipHistoryFetchRef.current = true;
+      setMessages((prev) => [...prev, assistantMessage]);
+      setActiveThreadPersistent(response.thread_id);
+      await loadThreads();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'تعذر إرسال الرسالة';
       setError(message);
+      setMessages((prev) => prev.slice(0, -1));
     } finally {
       setIsLoading(false);
     }
   };
 
-  const appendAssistant = (payload: ChatResponseBody) => {
-    const assistantMessage: Message = {
-      role: 'assistant',
-      text: payload.reply,
-      context: payload.context,
-      needsHuman: payload.needs_human,
-    };
-    setMessages((prev) => [...prev, assistantMessage]);
+  const openLoginModal = () => {
+    setLoginModalOpen(true);
+    setAuthError(null);
   };
+
+  const closeLoginModal = () => {
+    setLoginModalOpen(false);
+    setAuthError(null);
+  };
+
+  const isAuthenticated = Boolean(token);
 
   return (
     <section className={styles.container}>
-      <article className={styles.configCard}>
-        <div className={styles.selectorRow}>
-          <div className={styles.selectorGroup}>
-            <label className={styles.selectorLabel}>اختر الشخصية</label>
-            <div className={styles.chipGroup}>
-              {Object.entries(personaLabels).map(([key, label]) => {
-                const className = `${styles.chip} ${persona === key ? styles.chipActive : ''}`.trim();
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setPersona(key as PersonaOption)}
-                    className={className}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
+      <aside className={styles.sidebar}>
+        <div className={styles.threadSection}>
+          <div className={styles.threadHeader}>
+            <h3 className={styles.sectionTitle}>محادثاتي</h3>
+            <div className={styles.threadActions}>
+              <button type="button" className={styles.saveButton} onClick={openLoginModal}>
+                احفظ محادثاتي
+              </button>
+              <button type="button" className={styles.newThreadButton} onClick={handleStartNewThread}>
+                محادثة جديدة
+              </button>
             </div>
           </div>
-          <div className={styles.selectorGroup}>
-            <label className={styles.selectorLabel}>اختيار اللغة</label>
-            <div className={styles.chipGroup}>
-              {Object.entries(languageLabels).map(([key, label]) => {
-                const className = `${styles.chip} ${language === key ? styles.chipActive : ''}`.trim();
+          {threadsError && (
+            <div className={styles.errorBanner}>
+              <span>{threadsError}</span>
+              <button type="button" className={styles.retryButton} onClick={handleRetryThreads}>
+                إعادة المحاولة
+              </button>
+            </div>
+          )}
+          <div className={styles.threadList}>
+            {isLoadingThreads ? (
+              <div className={styles.threadPlaceholder}>... جار تحميل المحادثات</div>
+            ) : threads.length === 0 ? (
+              <div className={styles.threadPlaceholder}>لا توجد محادثات محفوظة بعد.</div>
+            ) : (
+              threads.map((thread) => {
+                const isActive = thread.thread_id === activeThreadId;
                 return (
                   <button
-                    key={key}
+                    key={thread.thread_id}
                     type="button"
-                    onClick={() => setLanguage(key as LanguageOption)}
-                    className={className}
+                    className={`${styles.threadButton} ${isActive ? styles.threadButtonActive : ''}`.trim()}
+                    onClick={() => handleSelectThread(thread.thread_id)}
                   >
-                    {label}
+                    <span className={styles.threadTitle}>{thread.title}</span>
+                    <span className={styles.threadMeta}>
+                      {thread.lang === 'jordanian' ? 'اللهجة الأردنية' : 'الفصحى'} ·{' '}
+                      {thread.persona === 'yazan' ? 'يزن' : 'المدرب المحايد'}
+                    </span>
                   </button>
                 );
-              })}
-            </div>
+              })
+            )}
           </div>
-          <div className={styles.selectorGroup}>
-            <label className={styles.selectorLabel}>رمز العائلة (اختياري)</label>
-            <input
-              value={householdId}
-              onChange={(event) => setHouseholdId(event.target.value)}
-              placeholder="household-123"
-              className={styles.householdInput}
-              inputMode="text"
-            />
-          </div>
+          {isAuthenticated && (
+            <button type="button" className={styles.logoutButton} onClick={handleLogout}>
+              تسجيل الخروج من الأسرة
+            </button>
+          )}
         </div>
-        <p className={styles.disclaimer}>{disclaimer}</p>
-      </article>
+      </aside>
 
-      <div className={styles.messagesCard} aria-live="polite">
-        {messages.length === 0 ? (
-          <div className={styles.messagesEmpty}>ابدأ الحوار بكتابة موقف ترغب بمناقشته.</div>
-        ) : (
-          messages.map((message, index) => {
-            const baseClass = message.role === 'user' ? styles.messageUser : styles.messageAssistant;
-            const className = `${styles.message} ${baseClass}`.trim();
-            return (
-              <div key={`${message.role}-${index}`} className={className}>
-                {message.role === 'assistant' ? (
-                  <MarkdownMessage text={message.text} />
-                ) : (
-                  <p className={styles.messageText} dir="auto">
-                    {message.text}
-                  </p>
-                )}
-                {message.role === 'assistant' && message.context && message.context.length > 0 && (
-                  <details className={styles.context}>
-                    <summary>السياق المستخدم</summary>
-                    <ul>
-                      {message.context.map((ctx) => (
-                        <li key={ctx}>{ctx}</li>
-                      ))}
-                    </ul>
-                  </details>
-                )}
-                {message.needsHuman && (
-                  <div className={styles.needsHuman}>تم اكتشاف موضوع حساس. الرجاء التواصل مع مختص موثوق.</div>
-                )}
+      <div className={styles.chatStack}>
+        <article className={styles.configCard}>
+          <div className={styles.selectorRow}>
+            <div className={styles.selectorGroup}>
+              <label className={styles.selectorLabel}>اختر الشخصية</label>
+              <div className={styles.chipGroup}>
+                {Object.entries(personaLabels).map(([key, label]) => {
+                  const className = `${styles.chip} ${persona === key ? styles.chipActive : ''}`.trim();
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setPersona(key as PersonaOption)}
+                      className={className}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
               </div>
-            );
-          })
-        )}
+            </div>
+            <div className={styles.selectorGroup}>
+              <label className={styles.selectorLabel}>اختيار اللغة</label>
+              <div className={styles.chipGroup}>
+                {Object.entries(languageLabels).map(([key, label]) => {
+                  const className = `${styles.chip} ${language === key ? styles.chipActive : ''}`.trim();
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setLanguage(key as LanguageOption)}
+                      className={className}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className={styles.selectorGroup}>
+              <label className={styles.selectorLabel}>رمز العائلة (اختياري)</label>
+              <input
+                value={householdId}
+                onChange={(event) => setHouseholdId(event.target.value)}
+                placeholder="household-123"
+                className={styles.householdInput}
+                inputMode="text"
+              />
+            </div>
+          </div>
+          <p className={styles.disclaimer}>{disclaimer}</p>
+        </article>
+
+        <div className={styles.messagesCard} aria-live="polite">
+          {isLoadingMessages ? (
+            <div className={styles.messagesEmpty}>... جار تحميل الرسائل</div>
+          ) : messages.length === 0 ? (
+            <div className={styles.messagesEmpty}>ابدأ الحوار بكتابة موقف ترغب بمناقشته.</div>
+          ) : (
+            messages.map((message, index) => {
+              const baseClass = message.role === 'user' ? styles.messageUser : styles.messageAssistant;
+              const className = `${styles.message} ${baseClass}`.trim();
+              return (
+                <div key={`${message.role}-${index}`} className={className}>
+                  {message.role === 'assistant' ? (
+                    <MarkdownMessage text={message.text} />
+                  ) : (
+                    <p className={styles.messageText} dir="auto">
+                      {message.text}
+                    </p>
+                  )}
+                  {message.needsHuman && (
+                    <div className={styles.needsHuman}>تم اكتشاف موضوع حساس. الرجاء التواصل مع مختص موثوق.</div>
+                  )}
+                </div>
+              );
+            })
+          )}
+          {messagesError && <div className={styles.error}>{messagesError}</div>}
+        </div>
+
+        <form onSubmit={handleSubmit} className={styles.formCard}>
+          <textarea
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            placeholder="صف الموقف الذي ترغب بمناقشته..."
+            rows={4}
+            className={styles.textarea}
+            dir="auto"
+          />
+          {error && <span className={styles.error}>{error}</span>}
+          <div className={styles.actions}>
+            <button type="submit" disabled={isLoading} className={styles.submitButton} aria-busy={isLoading}>
+              {isLoading ? (
+                <>
+                  <span className={styles.loadingDot} aria-hidden="true" />
+                  <span>جار معالجة الطلب...</span>
+                </>
+              ) : (
+                'أرسل'
+              )}
+            </button>
+          </div>
+        </form>
       </div>
 
-      <form onSubmit={handleSubmit} className={styles.formCard}>
-        <textarea
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          placeholder="صف الموقف الذي ترغب بمناقشته..."
-          rows={4}
-          className={styles.textarea}
-          dir="auto"
-        />
-        {error && <span className={styles.error}>{error}</span>}
-        <div className={styles.actions}>
-          <button type="submit" disabled={isLoading} className={styles.submitButton} aria-busy={isLoading}>
-            {isLoading ? (
-              <>
-                <span className={styles.loadingDot} aria-hidden="true" />
-                <span>جار معالجة الطلب...</span>
-              </>
-            ) : (
-              'أرسل'
+      {isLoginModalOpen && (
+        <div className={styles.modalOverlay} role="dialog" aria-modal="true">
+          <div className={styles.modalContent}>
+            <div className={styles.modalHeader}>
+              <h2>تسجيل دخول الأسرة</h2>
+              <button type="button" className={styles.closeButton} onClick={closeLoginModal}>
+                ×
+              </button>
+            </div>
+            <form onSubmit={handleLoginSubmit} className={styles.loginForm}>
+              <label className={styles.label}>
+                رمز العائلة
+                <input
+                  value={loginHouseholdId}
+                  onChange={(event) => setLoginHouseholdId(event.target.value)}
+                  className={styles.input}
+                  placeholder="household-123"
+                  autoComplete="username"
+                  dir="auto"
+                />
+              </label>
+              <label className={styles.label}>
+                السر الخاص
+                <input
+                  value={loginSecret}
+                  onChange={(event) => setLoginSecret(event.target.value)}
+                  className={styles.input}
+                  placeholder="••••••"
+                  type="password"
+                  autoComplete="current-password"
+                />
+              </label>
+              {authError && <div className={styles.error}>{authError}</div>}
+              <button type="submit" className={styles.modalSubmitButton}>
+                تسجيل الدخول
+              </button>
+            </form>
+            {isAuthenticated && (
+              <button type="button" className={styles.modalSecondaryButton} onClick={handleLogout}>
+                تسجيل الخروج من الأسرة
+              </button>
             )}
-          </button>
+          </div>
         </div>
-      </form>
+      )}
     </section>
   );
 }

@@ -40,6 +40,23 @@ Useful commands:
 - `docker compose logs -f nginx` — reverse proxy + TLS logs
 - `docker compose exec server pytest` — run backend tests (retrieval and safety heuristics)
 - `docker compose exec server alembic upgrade head` — run database migrations
+- `curl -s http://localhost/api/admin/households | jq` — list recent households (DEV helper)
+- `python tools/list_households.py --base-url http://127.0.0.1:8080/api` — same as above, formatted table (add `--json` for raw output). If the script cannot reach Docker (some shells block the socket), run `docker compose exec server python tools/list_households.py --base-url http://nginx/api` instead.
+- `docker compose exec db psql -U family -d familyai -c "SELECT id, name, language_preference, country, created_at FROM households ORDER BY created_at DESC LIMIT 20;"` — inspect households via psql
+
+### Household chat secrets
+
+Household login in the chat UI uses a shared secret stored in the database. Set or rotate it with the helper script (run inside the server container so it has the right environment):
+
+```bash
+docker compose exec server python -m app.scripts.set_household_secret HOUSEHOLD_ID NEW_SECRET
+
+# example
+docker compose exec server python -m app.scripts.set_household_secret aousabdo_family family-2024
+```
+
+Share the chosen secret with that household; after logging in via the modal the app will claim any guest threads created from the same browser.
+
 
 ## Sample corpus ingestion
 Populate the vector store with the provided bilingual parenting corpus:
@@ -77,6 +94,11 @@ The script parses Markdown front matter for metadata (topic, age_range, tone, co
 ## Frontend notes
 - Next.js App Router with Arabic-first layout, persona + dialect toggles, admin upload form, and profile management.
 - API base URL configured via `NEXT_PUBLIC_API_BASE_URL` to support future App Runner or external API deployments.
+
+### Chat memory & household login
+- Each conversation thread is persisted (guest = browser-scoped, logged-in = household-scoped) and automatically replayed when you reopen it.
+- The chat UI stores a `browser_id` per tab and calls `/api/chat/new`, `/api/chat/history`, `/api/chat/threads`, and `/api/chat/claim` to manage threads.
+- Household members can log in via the chat modal using the shared secret set with `set_household_secret.py`; after login the app claims guest threads for that household so they are available across devices.
 
 ## Backend notes
 - FastAPI modular routers: chat, profile CRUD, tips, admin upload.

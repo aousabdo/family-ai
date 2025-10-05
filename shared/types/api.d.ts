@@ -3,7 +3,8 @@ export interface ChatRequest {
   persona?: 'neutral' | 'yazan';
   language?: 'msa' | 'jordanian';
   household_id?: string;
-  thread_id: string;
+  thread_id?: string | null;
+  browser_id?: string;
 }
 
 export interface ChatResponse {
@@ -12,6 +13,20 @@ export interface ChatResponse {
   safety_reasons: string[];
   context: string[];
   persona: 'neutral' | 'yazan';
+  thread_id: string;
+}
+
+export interface ChatThreadSummary {
+  thread_id: string;
+  title: string;
+  persona: string;
+  lang: string;
+  last_message_at: string;
+}
+
+export interface ChatHistoryResponse {
+  thread_id: string;
+  turns: Array<{ role: 'user' | 'assistant'; content: string }>;
 }
 
 export interface TipsResponse {

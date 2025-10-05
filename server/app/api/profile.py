@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.core.security import create_access_token
 from app.core.settings import Settings, get_settings
-from app.db import crud
+from app.db import crud, models
 from app.db.session import session_scope
 
 router = APIRouter()
@@ -111,3 +111,29 @@ async def update_profile(household_id: str, payload: ProfileUpdatePayload):
             household.country = payload.country
         session.flush()
         return {"status": "updated"}
+
+
+@router.get("/admin/households")
+async def list_households_dev():
+    """DEV-ONLY helper to inspect recently created households."""
+    with session_scope() as session:
+        households = (
+            session.query(models.Household)
+            .order_by(models.Household.created_at.desc())
+            .limit(50)
+            .all()
+        )
+        data: list[dict[str, object]] = []
+        for household in households:
+            primary_email = household.parents[0].email if household.parents else None
+            data.append(
+                {
+                    "id": household.id,
+                    "name": household.name,
+                    "language_preference": household.language_preference,
+                    "country": household.country,
+                    "primary_email": primary_email,
+                    "created_at": household.created_at.isoformat() if household.created_at else None,
+                }
+            )
+    return {"households": data}

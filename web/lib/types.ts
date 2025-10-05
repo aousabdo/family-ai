@@ -6,7 +6,8 @@ export interface ChatRequestBody {
   persona: PersonaOption;
   language: LanguageOption;
   household_id?: string;
-  thread_id: string;
+  thread_id?: string | null;
+  browser_id?: string;
 }
 
 export interface ChatResponseBody {
@@ -15,6 +16,20 @@ export interface ChatResponseBody {
   safety_reasons: string[];
   context: string[];
   persona: PersonaOption;
+  thread_id: string;
+}
+
+export interface ChatThreadSummary {
+  thread_id: string;
+  title: string;
+  persona: string;
+  lang: string;
+  last_message_at: string;
+}
+
+export interface ChatHistoryResponse {
+  thread_id: string;
+  turns: Array<{ role: 'user' | 'assistant'; content: string }>;
 }
 
 export interface TipResponse {

@@ -7,6 +7,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api import auth as auth_routes
 from app.api import chat, profile, tips, upload
 from app.core.safety import SafetyChecker
 from app.core.settings import Settings, get_settings
@@ -32,6 +33,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(chat.router, prefix="/api", tags=["chat"])
+    app.include_router(auth_routes.router, prefix="/api", tags=["auth"])
     app.include_router(profile.router, prefix="/api", tags=["profile"])
     app.include_router(tips.router, prefix="/api", tags=["tips"])
     app.include_router(upload.router, prefix="/api", tags=["admin"])

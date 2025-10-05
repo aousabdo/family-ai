@@ -40,8 +40,15 @@ class StubOpenAIClient:
 @pytest.mark.asyncio
 async def test_memory_roundtrip() -> None:
     init_db()
-    thread_id = "test-thread-123"
     with session_scope() as session:
+        thread = crud.create_thread(
+            session,
+            persona="neutral",
+            lang="msa",
+            browser_id="test-browser",
+            household_id=None,
+        )
+        thread_id = thread.id
         crud.log_turn(session, thread_id, "user", "مرحبا")
         crud.log_turn(session, thread_id, "assistant", "أهلاً وسهلاً")
 
@@ -51,6 +58,7 @@ async def test_memory_roundtrip() -> None:
         language="msa",
         household_id=None,
         thread_id=thread_id,
+        browser_id="test-browser",
     )
 
     scope = {
@@ -68,6 +76,8 @@ async def test_memory_roundtrip() -> None:
     response = await chat_api.chat_endpoint(
         payload,
         request=request,
+        authorization=None,
+        x_browser_id="test-browser",
         settings=Settings(),
         retriever=StubRetriever(),
         openai_client=StubOpenAIClient(),
